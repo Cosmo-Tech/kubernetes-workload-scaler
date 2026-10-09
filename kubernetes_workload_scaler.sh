@@ -392,6 +392,12 @@ case "$1" in
         scale_down $KWS_CONFIGMAP_NAMESPACE $KWS_CONFIGMAP_NAME
         ;;
     --up)
+        current_status="$(get_current_workloads_status $KWS_CONFIGMAP_NAMESPACE $KWS_CONFIGMAP_NAME)"
+        if [ "$current_status" = "up" ]; then
+            write_log "Cluster is already up. Aborting this job to avoid cache configmap desynchronization."
+            exit 0
+        fi
+
         scale_up $KWS_CONFIGMAP_NAMESPACE $KWS_CONFIGMAP_NAME
         ;;
     *)
