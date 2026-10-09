@@ -263,14 +263,14 @@ get_saved_workload_replicas() {
 }
 
 
-# Get last scale down job timestamp
-# last_scale_down_job_timestamp <configmap_namespace> <configmap>
-get_last_scale_down_job_timestamp() {
-    local cm_ns=$1
-    local cm_name=$2
+# # Get last scale down job timestamp
+# # last_scale_down_job_timestamp <configmap_namespace> <configmap>
+# get_last_scale_down_job_timestamp() {
+#     local cm_ns=$1
+#     local cm_name=$2
 
-    kubectl -n $cm_ns get configmap $cm_name -o jsonpath='{.data.scale_down_job_timestamp}'
-}
+#     kubectl -n $cm_ns get configmap $cm_name -o jsonpath='{.data.scale_down_job_timestamp}'
+# }
 
 
 # Get current Kubernetes cluster workloads status (up or down)
@@ -279,12 +279,7 @@ get_current_workloads_status() {
     local cm_ns=$1
     local cm_name=$2
 
-    # If the timestamp exists, it means scale down job has run, otherwise it's up
-    if [ -z "$(get_last_scale_down_job_timestamp $cm_ns $cm_name)" ]; then
-        echo "up"
-    else
-        echo "down"
-    fi
+    kubectl -n $cm_ns get configmap $cm_name -o jsonpath='{.data.scale_status}'
 }
 
 
@@ -296,6 +291,9 @@ scale_down() {
 
     write_log "Writing scale_down job timestamp to $cm_ns/$cm_name..."
     store_to_configmap $cm_ns $cm_name 'scale_down_job_timestamp' "$(get_now)"
+
+    write_log "Writing scale status to $cm_ns/$cm_name..."
+    store_to_configmap $cm_ns $cm_name 'scale_status' "down"
 
     write_log "Reading all workloads to scale down from $cm_ns/$cm_name..."
     local statefulsets="$(get_saved_workload $cm_ns $cm_name 'statefulsets')"

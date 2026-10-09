@@ -18,20 +18,31 @@ rules:
   - apiGroups: [""]
     resources:
       - "pods"
+    verbs: ["get", "list", "watch", "delete"]
+
+  - apiGroups: [""]
+    resources:
       - "namespaces"
     verbs: ["get", "list", "watch"]
 
   - apiGroups: [""]
     resources:
       - "configmaps"
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
 
   - apiGroups: ["apps"]
     resources:
       - "statefulsets"
+      - "statefulsets/scale"
       - "deployments"
+      - "deployments/scale"
     verbs: ["get", "list", "watch", "patch", "update"]
+
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources:
+      - "clusters"
+    verbs: ["get", "list", "watch"]
 
   - apiGroups: ["batch"]
     resources:
