@@ -88,8 +88,11 @@ list_ns_deployments() {
 list_ns_cnpg_clusters() {
     local ns=$1
 
-    # <cluster_name>=<replicas>
-    kubectl -n $ns get clusters -o jsonpath='{range .items[*]}{.metadata.name}={.spec.instances}{"\n"}{end}'
+    # # <cluster_name>=<replicas>
+    # kubectl -n $ns get clusters -o jsonpath='{range .items[*]}{.metadata.name}={.spec.instances}{"\n"}{end}'
+
+    # <cluster_namespace>/<cluster_name>
+    kubectl -n $ns get clusters -o jsonpath='{.items[*].metadata.name}'
 }
 
 
@@ -153,18 +156,60 @@ scale_deployment() {
 }
 
 
+# # Scale replicas of a given Cloudnative-PG cluster
+# # Usage: scale_cnpg_cluster <namespace> <item> <replicas>
+# scale_cnpg_cluster() {
+#     local ns=$1
+#     local item=$2
+#     local replicas=$3
 
-# Scale replicas of a given Cloudnative-PG cluster
-# Usage: scale_cnpg_cluster <namespace> <item> <replicas>
-scale_cnpg_cluster() {
+#     write_log "Scaling cnpg_cluster $ns/$item to $replicas..."
+#     # kubectl -n $ns patch cluster $item --type='json' -p="[{"op": "replace", "path": "/spec/instances", "value": $replicas}]"
+
+#     kubectl -n $ns delete pods -l cnpg.io/cluster=$item
+# }
+
+
+# Scale down a given Cloudnative-PG cluster
+# CNPG clusters are not deployments nor statefulsets, they are pods triggered by the Cloudnative-PG operator
+# - if the operator is up   => 'spec.instances' of the cluster will be fullfilled
+# - if the operator is down => the pod can be killed, it will not restart
+#
+# Usage: scale_down_cnpg_cluster <namespace> <item> <replicas>
+scale_down_cnpg_cluster() {
     local ns=$1
     local item=$2
-    local replicas=$3
 
-    write_log "Scaling cnpg_cluster $ns/$item to $replicas..."
-    kubectl -n $ns patch cluster $item --type='json' -p="[{"op": "replace", "path": "/spec/instances", "value": $replicas}]"
+    write_log "Scaling cnpg_cluster $ns/$item to 0..."
+    kubectl -n $ns delete pods -l cnpg.io/cluster=$item
 }
 
+
+# # Scale up Cloudnative-PG operator
+# # Usage: scale_up_cnpg_operator
+# scale_up_cnpg_operator() {
+#     local cnpg_ns="$(kubectl get deployments -A -l app.kubernetes.io/name=cloudnative-pg -o jsonpath={.items[].metadata.namespace})"
+#     local cnpg_deployment="$(kubectl get deployments -A -l app.kubernetes.io/name=cloudnative-pg -o jsonpath={.items[].metadata.name})"
+#     # local cnpg_replicas="$(kubectl -n $cnpg_ns get deployment $cnpg_deployment -o jsonpath={.items[].spec.replicas})"
+
+#     write_log "The Cloudnative-PG operator is currently stopped but is required to scale down Cloudnative-PG clusters. Scaling up operator..."
+#     scale_deployment $cnpg_ns $cnpg_deployment "1"
+
+#     # Ensure the operator is running
+#     sleep 3
+#     kubectl -n $cnpg_ns rollout status deployment $cnpg_deployment --timeout=1200s
+# }
+
+
+# # Scale down Cloudnative-PG operator
+# # Usage: scale_down_cnpg_operator
+# scale_down_cnpg_operator() {
+#     local cnpg_ns="$(kubectl get deployments -A -l app.kubernetes.io/name=cloudnative-pg -o jsonpath={.items[].metadata.namespace})"
+#     local cnpg_deployment="$(kubectl get deployments -A -l app.kubernetes.io/name=cloudnative-pg -o jsonpath={.items[].metadata.name})"
+
+#     write_log "The Cloudnative-PG operator not used anymore. Scaling down operator..."
+#     scale_deployment $cnpg_ns $cnpg_deployment "0"
+# }
 
 
 # Save current workload state to configmap
@@ -179,7 +224,9 @@ save_workload() {
     namespaces="$(list_namespaces 'calico-system gatekeeper-system kube-node-lease kube-public kube-system tigera-operator')"
     write_log "Retrieving all workloads..."
     for ns in $namespaces; do
-        statefulsets="$(list_ns_statefusets $ns)"
+        local i
+
+        local statefulsets="$(list_ns_statefusets $ns)"
         for i in $statefulsets; do
             path="$(echo "$ns/$i")"
             write_log "statefulset:  $path"
@@ -187,7 +234,7 @@ save_workload() {
             statefulset_paths="$(echo $path $statefulset_paths)"
         done
 
-        deployments="$(list_ns_deployments $ns)"
+        local deployments="$(list_ns_deployments $ns)"
         for i in $deployments; do
             path="$(echo "$ns/$i")"
             write_log "deployment:   $path"
@@ -195,7 +242,7 @@ save_workload() {
             deployment_paths="$(echo $path $deployment_paths)"
         done
 
-        cnpg_clusters="$(list_ns_cnpg_clusters $ns)"
+        local cnpg_clusters="$(list_ns_cnpg_clusters $ns)"
         for i in $cnpg_clusters; do
             path="$(echo "$ns/$i")"
             write_log "cnpg_cluster: $path"
@@ -209,11 +256,9 @@ save_workload() {
     store_to_configmap $cm_ns $cm_name 'deployments' "$deployment_paths"
     store_to_configmap $cm_ns $cm_name 'cnpg_clusters' "$cnpg_cluster_paths"
 
-
     # Ensure the configmap is created
     sleep 3
 }
-
 
 
 # Get workload saved in configmap from last scale down
@@ -223,8 +268,37 @@ get_saved_workload() {
     local cm_name=$2
     local workload_type=$3
 
-    write_log "Get saved workload from $ns/$cm..."
     kubectl -n $cm_ns get cm $cm_name -o jsonpath="{.data.$workload_type}"
+}
+
+
+# Str manipulation to get the workload namespace from the saved configmap
+# Usage: get_saved_workload_ns <workload_path>
+get_saved_workload_ns() {
+    local workload_path=$1
+
+    # get NAMESPACE/name=replicas
+    echo $workload_path | cut -d/ -f1
+}
+
+
+# Str manipulation to get the workload namespace from the saved configmap
+# Usage: get_saved_workload_name <workload_path>
+get_saved_workload_name() {
+    local workload_path=$1
+
+    # get namespace/NAME=replicas
+    echo $workload_path | cut -d/ -f2 | cut -d= -f1
+}
+
+
+# Str manipulation to get the workload namespace from the saved configmap
+# Usage: get_saved_workload_replicas <workload_path>
+get_saved_workload_replicas() {
+    local workload_path=$1
+
+    # get namespace/name=REPLICAS
+    echo $workload_path | cut -d= -f2
 }
 
 
@@ -234,15 +308,44 @@ scale_down() {
     local cm_ns=$1
     local cm_name=$2
 
-    write_log "Reading workload to scale down from $cm_ns/$cm_name..."
+    write_log "Writing scale_down job timestamp to $cm_ns/$cm_name..."
+    store_to_configmap $cm_ns $cm_name 'scale_down_job_timestamp' "$(get_now)"
+
+    write_log "Reading all workloads to scale down from $cm_ns/$cm_name..."
     local statefulsets="$(get_saved_workload $cm_ns $cm_name 'statefulsets')"
     local deployments="$(get_saved_workload $cm_ns $cm_name 'deployments')"
     local cnpg_clusters="$(get_saved_workload $cm_ns $cm_name 'cnpg_clusters')"
 
     write_log "Running scale down job..."
-    # scale_statefulset
-    # scale_deployment
-    # scale_cnpg_cluster
+    local workload
+    local workload_ns
+    local workload_name
+    local workload_replicas
+
+    write_log "=> Scaling down statefulsets..."
+    for workload in $statefulsets; do
+        workload_ns="$(get_saved_workload_ns $workload)"
+        workload_name="$(get_saved_workload_name $workload)"
+
+        scale_statefulset $workload_ns $workload_name "0"
+    done
+
+    write_log "=> Scaling down deployments..."
+    for workload in $deployments; do
+        workload_ns="$(get_saved_workload_ns $workload)"
+        workload_name="$(get_saved_workload_name $workload)"
+
+        scale_deployment $workload_ns $workload_name "0"
+    done
+
+    # Must be done after Cloudnative-PG operator deployment scale down, otherwise CNPG clusters will respawn
+    write_log "=> Scaling down cnpg_clusters..."
+    for workload in $cnpg_clusters; do
+        workload_ns="$(get_saved_workload_ns $workload)"
+        workload_name="$(get_saved_workload_name $workload)"
+
+        scale_down_cnpg_cluster $workload_ns $workload_name
+    done
 }
 
 
@@ -252,21 +355,47 @@ scale_up() {
     local cm_ns=$1
     local cm_name=$2
 
-    write_log "Reading workload to scale up from $cm_ns/$cm_name..."
+    # write_log "Writing scale_up job timestamp to $cm_ns/$cm_name..."
+    # store_to_configmap $cm_ns $cm_name 'scale_up_job_timestamp' "$(get_now)"
+
+    write_log "Reading all workloads to scale up from $cm_ns/$cm_name..."
     local statefulsets="$(get_saved_workload $cm_ns $cm_name 'statefulsets')"
     local deployments="$(get_saved_workload $cm_ns $cm_name 'deployments')"
     local cnpg_clusters="$(get_saved_workload $cm_ns $cm_name 'cnpg_clusters')"
 
     write_log "Running scale up job..."
-    # scale_statefulset $ns $
-    # scale_deployment $ns <item> <replicas>
-    # scale_cnpg_cluster
-}
 
+    # write_log "=> Scaling up cnpg_clusters..."
+    # for workload in $cnpg_clusters; do
+    #     workload_ns="$(get_saved_workload_ns $workload)"
+    #     workload_name="$(get_saved_workload_name $workload)"
+
+    #     scale_down_cnpg_cluster $workload_ns $workload_name
+    # done
+
+    write_log "=> Scaling up deployments..."
+    for workload in $deployments; do
+        workload_ns="$(get_saved_workload_ns $workload)"
+        workload_name="$(get_saved_workload_name $workload)"
+        workload_replicas="$(get_saved_workload_replicas $workload)"
+
+        scale_deployment $workload_ns $workload_name $workload_replicas
+    done
+
+    write_log "=> Scaling up statefulsets..."
+    for workload in $statefulsets; do
+        workload_ns="$(get_saved_workload_ns $workload)"
+        workload_name="$(get_saved_workload_name $workload)"
+        workload_replicas="$(get_saved_workload_replicas $workload)"
+
+        scale_statefulset $workload_ns $workload_name $workload_replicas
+    done
+}
 
 
 CM_NS='default'
 CM_NAME='workload-scaler-replicas'
+
 
 case "$1" in
     --down)
@@ -274,159 +403,12 @@ case "$1" in
         scale_down $CM_NS $CM_NAME
         ;;
     --up)
-        # read_workload $CM_NS $CM_NAME
-        # get_saved_workload $CM_NS $CM_NAME
         scale_up $CM_NS $CM_NAME
         ;;
     *)
         usage
         ;;
 esac
-
-
-
-
-
-
-# cm_ns='default'
-# cm_name='workload-scaler-replicas'
-# delete_configmap $cm_ns $cm_name
-
-
-# namespaces="$(list_namespaces 'calico-system gatekeeper-system kube-node-lease kube-public kube-system tigera-operator')"
-# echo "\nRetrieving all workloads..."
-# for ns in $namespaces; do
-#     statefulsets="$(list_ns_statefusets $ns)"
-#     for i in $statefulsets; do
-#         path="$(echo "$ns/$i")"
-#         echo "statefulset:  $path"
-
-#         statefulset_paths="$(echo $path $statefulset_paths)"
-#     done
-
-#     deployments="$(list_ns_deployments $ns)"
-#     for i in $deployments; do
-#         path="$(echo "$ns/$i")"
-#         echo "deployment:   $path"
-
-#         deployment_paths="$(echo $path $deployment_paths)"
-#     done
-
-#     cnpg_clusters="$(list_ns_cnpg_clusters $ns)"
-#     for i in $cnpg_clusters; do
-#         path="$(echo "$ns/$i")"
-#         echo "cnpg_cluster: $path"
-
-#         cnpg_cluster_paths="$(echo $path $cnpg_cluster_paths)"
-#     done
-# done
-
-# echo "\nSaving workloads states to configmap $cm_ns/$cm_name..."
-# store_to_configmap $cm_ns $cm_name 'statefulsets' "$statefulset_paths"
-# store_to_configmap $cm_ns $cm_name 'deployments' "$deployment_paths"
-# store_to_configmap $cm_ns $
-
-
-# for ns in $namespaces; do
-#     statefulsets="$(list_ns_statefusets $ns)"
-#     for i in $statefulsets; do
-#         path="$(echo "$ns/$i")"
-#         echo $path
-
-#         statefulset_paths="$(echo $path $statefulset_paths)"
-#     done
-# done
-# store_to_configmap $cm_ns $cm_name 'statefulsets' $statefulset_paths
-
-
-# for ns in $namespaces; do
-#     deployments="$(list_ns_deployments $ns)"
-#     for i in $deployments; do
-#         path="$(echo "$ns/$i")"
-#         echo $path
-
-#         deployment_paths="$(echo $path $deployment_paths)"
-#     done
-# done
-# store_to_configmap $cm_ns $cm_name 'deployments' $deployment_paths
-
-
-# for ns in $namespaces; do
-#     cnpg_clusters="$(list_ns_cnpg_clusters $ns)"
-#     for i in $cnpg_clusters; do
-#         path="$(echo "$ns/$i")"
-#         echo $path
-
-#         cnpg_cluster_paths="$(echo $path $cnpg_cluster_paths)"
-#     done
-# done
-# store_to_configmap $cm_ns $cm_name 'cnpg_clusters' $cnpg_cluster_paths
-
-
-
-# # Scale down a given statefulset
-# # Usage: scale_down_statefulset <namespace> <item>
-# scale_down_statefulset() {
-#     local ns=$1
-#     local item=$2
-
-#     scale_statefulset $ns $item 0
-# }
-
-
-# # Scale down a given deployment
-# # Usage: scale_down_deployment <namespace> <item>
-# scale_down_deployment() {
-#     local ns=$1
-#     local item=$2
-
-#     scale_deployment $ns $item 0
-# }
-
-
-
-# # Scale down a given Cloudnative-PG cluster
-# # Usage: scale_down_cnpg_cluster <namespace> <item>
-# scale_down_cnpg_cluster() {
-#     local ns=$1
-#     local item=$2
-
-#     scale_cnpg_cluster $ns $item 0
-# }
-
-
-# # Scale up a given statefulset
-# # Usage: scale_up_statefulset <namespace> <item>
-# scale_up_statefulset() {
-#     local ns=$1
-#     local item=$2
-#     local replicas=$3
-
-#     scale_statefulset $ns $item $replicas
-# }
-
-
-# # Scale up a given deployment
-# # Usage: scale_up_deployment <namespace> <item>
-# scale_up_deployment() {
-#     local ns=$1
-#     local item=$2
-#     local replicas=$3
-
-#     scale_deployment $ns $item $replicas
-# }
-
-
-
-# # Scale up a given Cloudnative-PG cluster
-# # Usage: scale_up_cnpg_cluster <namespace> <item>
-# scale_up_cnpg_cluster() {
-#     local ns=$1
-#     local item=$2
-#     local replicas=$3
-
-#     scale_cnpg_cluster $ns $item $replicas
-# }
 
 
 exit
