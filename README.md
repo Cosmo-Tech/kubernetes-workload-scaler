@@ -30,15 +30,19 @@ Cloud agnostic Kubernetes cluster start/stop tool
     ./kubernetes-workload-scaler.sh --down
     ```
 
-### Docker
+### Helm
+* Install
+    ```
+    helm -n <NAMESPACE> upgrade --install kws helm-chart/kubernetes-workload-scaler/ --version 0.0.0 --values kws.values.yaml
+    ```
 * Scale up
     ```
-    todo
+    kubectl -n <NAMESPACE> create job --from=cronjob/kws-kubernetes-workload-scaler-scale-up scale-up
     ```
 
 * Scale down
     ```
-    todo
+    kubectl -n <NAMESPACE> create job --from=cronjob/kws-kubernetes-workload-scaler-scale-down scale-down
     ```
 
 ### Customization
