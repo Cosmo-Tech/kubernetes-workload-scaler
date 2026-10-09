@@ -14,4 +14,4 @@ RUN chmod +x ./*.sh \
  && curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
  && chmod +x ./kubectl
 
-CMD ["kubernetes_workload_scaler.sh"]
+ENTRYPOINT ["./kubernetes_workload_scaler.sh"]
