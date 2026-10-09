@@ -365,6 +365,9 @@ scale_up() {
 
         scale_statefulset $workload_ns $workload_name $workload_replicas
     done
+
+    write_log "Writing scale status to $cm_ns/$cm_name..."
+    store_to_configmap $cm_ns $cm_name 'scale_status' "up"
 }
 
 
