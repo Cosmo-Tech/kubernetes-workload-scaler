@@ -88,8 +88,7 @@ list_ns_deployments() {
 list_ns_cnpg_clusters() {
     local ns=$1
 
-    # # <cluster_name>=<replicas>
-    # kubectl -n $ns get clusters -o jsonpath='{range .items[*]}{.metadata.name}={.spec.instances}{"\n"}{end}'
+    # NOTE: the format used to store cnpg_clusters is not the same as statefulsets & depployments because we can't manually scale the replicas
 
     # <cluster_namespace>/<cluster_name>
     kubectl -n $ns get clusters -o jsonpath='{.items[*].metadata.name}'
@@ -109,16 +108,6 @@ store_to_configmap() {
 
     kubectl -n $ns patch configmap $cm --type merge -p "{\"data\":{\"$key\":\"$value\"}}"
 }
-
-
-# # Get a given configmap
-# # Usage: get_configmap <namespace> <name>
-# get_configmap() {
-#     local ns=$1
-#     local cm=$2
-
-#     kubectl -n $ns get configmap $cm
-# }
 
 
 # Delete a given configmap
@@ -156,20 +145,6 @@ scale_deployment() {
 }
 
 
-# # Scale replicas of a given Cloudnative-PG cluster
-# # Usage: scale_cnpg_cluster <namespace> <item> <replicas>
-# scale_cnpg_cluster() {
-#     local ns=$1
-#     local item=$2
-#     local replicas=$3
-
-#     write_log "Scaling cnpg_cluster $ns/$item to $replicas..."
-#     # kubectl -n $ns patch cluster $item --type='json' -p="[{"op": "replace", "path": "/spec/instances", "value": $replicas}]"
-
-#     kubectl -n $ns delete pods -l cnpg.io/cluster=$item
-# }
-
-
 # Scale down a given Cloudnative-PG cluster
 # CNPG clusters are not deployments nor statefulsets, they are pods triggered by the Cloudnative-PG operator
 # - if the operator is up   => 'spec.instances' of the cluster will be fullfilled
@@ -183,33 +158,6 @@ scale_down_cnpg_cluster() {
     write_log "Scaling cnpg_cluster $ns/$item to 0..."
     kubectl -n $ns delete pods -l cnpg.io/cluster=$item
 }
-
-
-# # Scale up Cloudnative-PG operator
-# # Usage: scale_up_cnpg_operator
-# scale_up_cnpg_operator() {
-#     local cnpg_ns="$(kubectl get deployments -A -l app.kubernetes.io/name=cloudnative-pg -o jsonpath={.items[].metadata.namespace})"
-#     local cnpg_deployment="$(kubectl get deployments -A -l app.kubernetes.io/name=cloudnative-pg -o jsonpath={.items[].metadata.name})"
-#     # local cnpg_replicas="$(kubectl -n $cnpg_ns get deployment $cnpg_deployment -o jsonpath={.items[].spec.replicas})"
-
-#     write_log "The Cloudnative-PG operator is currently stopped but is required to scale down Cloudnative-PG clusters. Scaling up operator..."
-#     scale_deployment $cnpg_ns $cnpg_deployment "1"
-
-#     # Ensure the operator is running
-#     sleep 3
-#     kubectl -n $cnpg_ns rollout status deployment $cnpg_deployment --timeout=1200s
-# }
-
-
-# # Scale down Cloudnative-PG operator
-# # Usage: scale_down_cnpg_operator
-# scale_down_cnpg_operator() {
-#     local cnpg_ns="$(kubectl get deployments -A -l app.kubernetes.io/name=cloudnative-pg -o jsonpath={.items[].metadata.namespace})"
-#     local cnpg_deployment="$(kubectl get deployments -A -l app.kubernetes.io/name=cloudnative-pg -o jsonpath={.items[].metadata.name})"
-
-#     write_log "The Cloudnative-PG operator not used anymore. Scaling down operator..."
-#     scale_deployment $cnpg_ns $cnpg_deployment "0"
-# }
 
 
 # Save current workload state to configmap
@@ -355,9 +303,6 @@ scale_up() {
     local cm_ns=$1
     local cm_name=$2
 
-    # write_log "Writing scale_up job timestamp to $cm_ns/$cm_name..."
-    # store_to_configmap $cm_ns $cm_name 'scale_up_job_timestamp' "$(get_now)"
-
     write_log "Reading all workloads to scale up from $cm_ns/$cm_name..."
     local statefulsets="$(get_saved_workload $cm_ns $cm_name 'statefulsets')"
     local deployments="$(get_saved_workload $cm_ns $cm_name 'deployments')"
@@ -365,13 +310,7 @@ scale_up() {
 
     write_log "Running scale up job..."
 
-    # write_log "=> Scaling up cnpg_clusters..."
-    # for workload in $cnpg_clusters; do
-    #     workload_ns="$(get_saved_workload_ns $workload)"
-    #     workload_name="$(get_saved_workload_name $workload)"
-
-    #     scale_down_cnpg_cluster $workload_ns $workload_name
-    # done
+    # NOTE: cnpg_clusters are scaled up by the Cloudnative-PG operator, don't need to do it from the script
 
     write_log "=> Scaling up deployments..."
     for workload in $deployments; do
@@ -393,17 +332,22 @@ scale_up() {
 }
 
 
-CM_NS='default'
-CM_NAME='workload-scaler-replicas'
+if [ -z "$KWS_CONFIGMAP_NAMESPACE" ]; then
+    KWS_CONFIGMAP_NAMESPACE='default'
+fi
+
+if [ -z "$KWS_CONFIGMAP_NAME" ]; then
+    KWS_CONFIGMAP_NAME='kws-cache'
+fi
 
 
 case "$1" in
     --down)
-        save_workload $CM_NS $CM_NAME
-        scale_down $CM_NS $CM_NAME
+        save_workload $KWS_CONFIGMAP_NAMESPACE $KWS_CONFIGMAP_NAME
+        scale_down $KWS_CONFIGMAP_NAMESPACE $KWS_CONFIGMAP_NAME
         ;;
     --up)
-        scale_up $CM_NS $CM_NAME
+        scale_up $KWS_CONFIGMAP_NAMESPACE $KWS_CONFIGMAP_NAME
         ;;
     *)
         usage

@@ -1,4 +1,5 @@
 # Kubernetes workload scaler
+> "KWS"
 
 Cloud agnostic Kubernetes cluster start/stop tool
 
@@ -14,7 +15,7 @@ Cloud agnostic Kubernetes cluster start/stop tool
 * A working Kubernetes cluster
 
 > [!NOTE]
-> This tool intends to start/stop Kubernetes clusters by scaling its workload.
+> This tool intends to start/stop Kubernetes clusters by scaling its workload. \
 > It means nodes pools you want to scale must be configured with minimal nodes to 0.
 
 ## Usages
@@ -39,6 +40,12 @@ Cloud agnostic Kubernetes cluster start/stop tool
     ```
     todo
     ```
+
+### Customization
+| Environment variables     | Default values
+| ---                       | ---
+| KWS_CONFIGMAP_NAMESPACE   | `default`
+| KWS_CONFIGMAP_NAME        | `kws-cache`
 
 
 ## Developpers
