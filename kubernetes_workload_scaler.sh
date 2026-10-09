@@ -45,6 +45,15 @@ write_log() {
 }
 
 
+# Prefix all piped lines with timestamp
+# Usage: command... | log_output
+log_output() {
+    while IFS= read -r line; do
+        echo "[$(get_now)] $line"
+    done
+}
+
+
 # List all namespaces + optionally filter them from exclusion list
 # Usages:
 #   list_namespaces
@@ -68,8 +77,10 @@ list_namespaces() {
 list_ns_statefusets() {
     local ns=$1
 
-    # <statefulset_name>=<replicas>
-   kubectl -n $ns get statefulsets -o jsonpath='{range .items[*]}{.metadata.name}={.spec.replicas}{"\n"}{end}'
+    # NOTES:
+    # - str format is <statefulset_name>=<replicas>
+    # - ignore if already replica=0 with grep -v "=0$"
+    kubectl -n $ns get statefulsets -o jsonpath='{range .items[*]}{.metadata.name}={.spec.replicas}{"\n"}{end}' | grep -v "=0$"
 }
 
 
@@ -78,8 +89,10 @@ list_ns_statefusets() {
 list_ns_deployments() {
     local ns=$1
 
-    # <deployment_name>=<replicas>
-    kubectl -n $ns get deployments -o jsonpath='{range .items[*]}{.metadata.name}={.spec.replicas}{"\n"}{end}'
+    # NOTES:
+    # - str format is <deployment_name>=<replicas>
+    # - ignore if already replica=0 with grep -v "=0$"
+    kubectl -n $ns get deployments -o jsonpath='{range .items[*]}{.metadata.name}={.spec.replicas}{"\n"}{end}' | grep -v "=0$"
 }
 
 
@@ -88,9 +101,9 @@ list_ns_deployments() {
 list_ns_cnpg_clusters() {
     local ns=$1
 
-    # NOTE: the format used to store cnpg_clusters is not the same as statefulsets & depployments because we can't manually scale the replicas
-
-    # <cluster_namespace>/<cluster_name>
+    # NOTES:
+    # - str format is <cluster_namespace>/<cluster_name>
+    # - the format used to store cnpg_clusters is not the same as statefulsets & depployments because we can't manually scale the replicas
     kubectl -n $ns get clusters -o jsonpath='{.items[*].metadata.name}'
 }
 
@@ -104,9 +117,9 @@ store_to_configmap() {
     local value=$4
 
     # Silently create configmap if not exists
-    kubectl -n $ns create configmap $cm --dry-run=client -o yaml | kubectl apply -f -
+    kubectl -n $ns create configmap $cm --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1
 
-    kubectl -n $ns patch configmap $cm --type merge -p "{\"data\":{\"$key\":\"$value\"}}"
+    kubectl -n $ns patch configmap $cm --type merge -p "{\"data\":{\"$key\":\"$value\"}}" | log_output
 }
 
 
@@ -117,7 +130,7 @@ delete_configmap() {
     local cm=$2
 
     write_log "Deleting configmap $ns/$cm..."
-    kubectl -n $ns delete configmap $cm --ignore-not-found=true
+    kubectl -n $ns delete configmap $cm --ignore-not-found=true | log_output
 }
 
 
@@ -129,7 +142,7 @@ scale_statefulset() {
     local replicas=$3
 
     write_log "Scaling statefulset $ns/$item to $replicas..."
-    kubectl -n $ns scale --replicas $replicas statefulset $item
+    kubectl -n $ns scale --replicas $replicas statefulset $item | log_output
 }
 
 
@@ -141,7 +154,7 @@ scale_deployment() {
     local replicas=$3
 
     write_log "Scaling deployment $ns/$item to $replicas..."
-    kubectl -n $ns scale --replicas $replicas deployment $item
+    kubectl -n $ns scale --replicas $replicas deployment $item | log_output
 }
 
 
@@ -156,7 +169,7 @@ scale_down_cnpg_cluster() {
     local item=$2
 
     write_log "Scaling cnpg_cluster $ns/$item to 0..."
-    kubectl -n $ns delete pods -l cnpg.io/cluster=$item
+    kubectl -n $ns delete pods -l cnpg.io/cluster=$item | log_output
 }
 
 
@@ -247,6 +260,31 @@ get_saved_workload_replicas() {
 
     # get namespace/name=REPLICAS
     echo $workload_path | cut -d= -f2
+}
+
+
+# Get last scale down job timestamp
+# last_scale_down_job_timestamp <configmap_namespace> <configmap>
+get_last_scale_down_job_timestamp() {
+    local cm_ns=$1
+    local cm_name=$2
+
+    kubectl -n $cm_ns get configmap $cm_name -o jsonpath='{.data.scale_down_job_timestamp}'
+}
+
+
+# Get current Kubernetes cluster workloads status (up or down)
+# get_current_workloads_status <configmap_namespace> <configmap>
+get_current_workloads_status() {
+    local cm_ns=$1
+    local cm_name=$2
+
+    # If the timestamp exists, it means scale down job has run, otherwise it's up
+    if [ -z "$(get_last_scale_down_job_timestamp $cm_ns $cm_name)" ]; then
+        echo "up"
+    else
+        echo "down"
+    fi
 }
 
 
@@ -343,6 +381,12 @@ fi
 
 case "$1" in
     --down)
+        current_status="$(get_current_workloads_status $KWS_CONFIGMAP_NAMESPACE $KWS_CONFIGMAP_NAME)"
+        if [ "$current_status" = "down" ]; then
+            write_log "Cluster is already down. Aborting this job to avoid cache configmap desynchronization."
+            exit 0
+        fi
+
         save_workload $KWS_CONFIGMAP_NAMESPACE $KWS_CONFIGMAP_NAME
         scale_down $KWS_CONFIGMAP_NAMESPACE $KWS_CONFIGMAP_NAME
         ;;
