@@ -19,13 +19,29 @@ done
 usage() {
     echo "Kubernetes workload scaler"
     echo "  Scale down/up all pods from all namespaces"
-    echo "  This script intends to be used directly from scale-up/down Kubernetes cronjobs"
+    echo "  This script intends to be used directly from Kubernetes cronjobs"
     echo ""
     echo "Usages:"
     echo "  $0 --up         scale up all pods on the cluster"
     echo "  $0 --down       scale down all pods on the cluster"
 
     exit 1
+}
+
+
+# Get current datetime
+# Usage: get_now
+get_now() {
+    date '+%Y-%m-%d %H:%M:%S'
+}
+
+
+# Sanitize logs format
+# Usage: write_log <message>
+write_log() {
+    local message=$1
+
+    echo -n "[$(get_now)] $message\n"
 }
 
 
@@ -85,10 +101,6 @@ store_to_configmap() {
     local key=$3
     local value=$4
 
-    # if [ ! "$(kubectl -n $ns get configmap $cm)" ]; then
-    #     kubectl -n $ns create configmap $cm
-    # fi
-
     # Silently create configmap if not exists
     kubectl -n $ns create configmap $cm --dry-run=client -o yaml | kubectl apply -f -
 
@@ -112,7 +124,7 @@ delete_configmap() {
     local ns=$1
     local cm=$2
 
-    echo "Deleting configmap $ns/$cm..."
+    write_log "Deleting configmap $ns/$cm..."
     kubectl -n $ns delete configmap $cm --ignore-not-found=true
 }
 
@@ -124,7 +136,7 @@ scale_statefulset() {
     local item=$2
     local replicas=$3
 
-    echo "Scaling statefulset $ns/$item to $replicas..."
+    write_log "Scaling statefulset $ns/$item to $replicas..."
     kubectl -n $ns scale --replicas $replicas statefulset $item
 }
 
@@ -136,7 +148,7 @@ scale_deployment() {
     local item=$2
     local replicas=$3
 
-    echo "Scaling deployment $ns/$item to $replicas..."
+    write_log "Scaling deployment $ns/$item to $replicas..."
     kubectl -n $ns scale --replicas $replicas deployment $item
 }
 
@@ -149,7 +161,7 @@ scale_cnpg_cluster() {
     local item=$2
     local replicas=$3
 
-    echo "Scaling cnpg_cluster $ns/$item to $replicas..."
+    write_log "Scaling cnpg_cluster $ns/$item to $replicas..."
     kubectl -n $ns patch cluster $item --type='json' -p="[{"op": "replace", "path": "/spec/instances", "value": $replicas}]"
 }
 
@@ -165,12 +177,12 @@ save_workload() {
     delete_configmap $cm_ns $cm_name
 
     namespaces="$(list_namespaces 'calico-system gatekeeper-system kube-node-lease kube-public kube-system tigera-operator')"
-    echo "\nRetrieving all workloads..."
+    write_log "Retrieving all workloads..."
     for ns in $namespaces; do
         statefulsets="$(list_ns_statefusets $ns)"
         for i in $statefulsets; do
             path="$(echo "$ns/$i")"
-            echo "statefulset:  $path"
+            write_log "statefulset:  $path"
 
             statefulset_paths="$(echo $path $statefulset_paths)"
         done
@@ -178,7 +190,7 @@ save_workload() {
         deployments="$(list_ns_deployments $ns)"
         for i in $deployments; do
             path="$(echo "$ns/$i")"
-            echo "deployment:   $path"
+            write_log "deployment:   $path"
 
             deployment_paths="$(echo $path $deployment_paths)"
         done
@@ -186,22 +198,94 @@ save_workload() {
         cnpg_clusters="$(list_ns_cnpg_clusters $ns)"
         for i in $cnpg_clusters; do
             path="$(echo "$ns/$i")"
-            echo "cnpg_cluster: $path"
+            write_log "cnpg_cluster: $path"
 
             cnpg_cluster_paths="$(echo $path $cnpg_cluster_paths)"
         done
     done
 
-    echo "\nSaving workloads states to configmap $cm_ns/$cm_name..."
+    write_log "Saving workloads states to configmap $cm_ns/$cm_name..."
     store_to_configmap $cm_ns $cm_name 'statefulsets' "$statefulset_paths"
     store_to_configmap $cm_ns $cm_name 'deployments' "$deployment_paths"
     store_to_configmap $cm_ns $cm_name 'cnpg_clusters' "$cnpg_cluster_paths"
+
+
+    # Ensure the configmap is created
+    sleep 3
 }
+
+
+
+# Get workload saved in configmap from last scale down
+# Usage: get_saved_workload <configmap_namespace> <configmap> <workload_type (statefulset/deployment/cnpg_cluster)>
+get_saved_workload() {
+    local cm_ns=$1
+    local cm_name=$2
+    local workload_type=$3
+
+    write_log "Get saved workload from $ns/$cm..."
+    kubectl -n $cm_ns get cm $cm_name -o jsonpath="{.data.$workload_type}"
+}
+
+
+# Scale down job (reading workload to scale from configmap)
+# Usage: scale_down <configmap_namespace> <configmap>
+scale_down() {
+    local cm_ns=$1
+    local cm_name=$2
+
+    write_log "Reading workload to scale down from $cm_ns/$cm_name..."
+    local statefulsets="$(get_saved_workload $cm_ns $cm_name 'statefulsets')"
+    local deployments="$(get_saved_workload $cm_ns $cm_name 'deployments')"
+    local cnpg_clusters="$(get_saved_workload $cm_ns $cm_name 'cnpg_clusters')"
+
+    write_log "Running scale down job..."
+    # scale_statefulset
+    # scale_deployment
+    # scale_cnpg_cluster
+}
+
+
+# Scale up job (reading workload to scale from configmap)
+# Usage: scale_up <configmap_namespace> <configmap>
+scale_up() {
+    local cm_ns=$1
+    local cm_name=$2
+
+    write_log "Reading workload to scale up from $cm_ns/$cm_name..."
+    local statefulsets="$(get_saved_workload $cm_ns $cm_name 'statefulsets')"
+    local deployments="$(get_saved_workload $cm_ns $cm_name 'deployments')"
+    local cnpg_clusters="$(get_saved_workload $cm_ns $cm_name 'cnpg_clusters')"
+
+    write_log "Running scale up job..."
+    # scale_statefulset $ns $
+    # scale_deployment $ns <item> <replicas>
+    # scale_cnpg_cluster
+}
+
 
 
 CM_NS='default'
 CM_NAME='workload-scaler-replicas'
-save_workload $CM_NS $CM_NAME
+
+case "$1" in
+    --down)
+        save_workload $CM_NS $CM_NAME
+        scale_down $CM_NS $CM_NAME
+        ;;
+    --up)
+        # read_workload $CM_NS $CM_NAME
+        # get_saved_workload $CM_NS $CM_NAME
+        scale_up $CM_NS $CM_NAME
+        ;;
+    *)
+        usage
+        ;;
+esac
+
+
+
+
 
 
 # cm_ns='default'

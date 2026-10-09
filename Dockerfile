@@ -1,8 +1,17 @@
-FROM registry.cosmotech.com/proxy-chainguard/cosmotech/kubectl
+FROM registry.cosmotech.com/proxy-chainguard/cosmotech/os-shell-iamguarded
+
+USER root
 
 WORKDIR /app
-COPY * ./
 
-RUN chmod +x ./*.sh
+ENV PATH="/app:${PATH}"
 
-CMD ["", ""]
+COPY *.md .
+COPY *.sh .
+
+RUN chmod +x ./*.sh \
+ && KUBECTL_VERSION=$(curl -L -s https://dl.k8s.io/release/stable.txt) \
+ && curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+ && chmod +x ./kubectl
+
+CMD ["kubernetes_workload_scaler.sh"]
