@@ -38,15 +38,15 @@
 > *workloads = statefulsets + deployments + cnpg_clusters (=pods)
 
 ### Workflows
-* Scale down
-    1. List all workloads found in all namespaces
-    2. Store this list to a configmap
-    3. Scale down the workload listed in the configmap
+#### Scale down
+1. List all workloads found in all namespaces
+2. Store this list to a configmap
+3. Scale down the workload listed in the configmap
 
-* Scale up
-    > :warning: Can run only after a scale down
-    1. Read the configmap created during scale down
-    2. Scale up the workload from the configmap
+#### Scale up
+> :warning: Can run only after a scale down
+1. Read the configmap created during scale down
+2. Scale up the workload from the configmap
 
 <br>
 <br>
