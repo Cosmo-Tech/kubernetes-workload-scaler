@@ -1,7 +1,10 @@
 # Kubernetes workload scaler
 
+Cloud agnostic Kubernetes cluster start/stop tool
+
 * Scale up/down all pods from all namespaces
 * Designed to work in Kubernetes cronjob (1 job for scale up, 1 job for scale down)
+* Cloud agnostic (because it works directly inside the cluster)
 * Work with current kubectl context
 * 100% POSIX Shell
 
@@ -9,6 +12,10 @@
 * A shell
 * [kubectl](https://kubernetes.io/fr/docs/tasks/tools/install-kubectl/)
 * A working Kubernetes cluster
+
+> [!NOTE]
+> This tool intends to start/stop Kubernetes clusters by scaling its workload.
+> It means nodes pools you want to scale must be configured with minimal nodes to 0.
 
 ## Usages
 ### CLI
