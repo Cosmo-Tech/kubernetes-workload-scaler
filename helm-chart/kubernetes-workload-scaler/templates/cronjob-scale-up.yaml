@@ -30,7 +30,7 @@ spec:
                   value: {{ .Values.config.cache.configmapName }}
               resources:
                 {{- toYaml .Values.workload.resources | nindent 16 }}
-              command: ["kws", "--up"]
+              command: ["/app/kws", "--up"]
 
           {{- with .Values.workload.image.pullSecrets }}
           imagePullSecrets:
