@@ -13,6 +13,7 @@ spec:
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: {{ .Values.config.cronjob.successfulJobsHistoryLimit }}
   failedJobsHistoryLimit: {{ .Values.config.cronjob.failedJobsHistoryLimit }}
+  startingDeadlineSeconds: 60
   jobTemplate:
     spec:
       template:
