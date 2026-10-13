@@ -7,10 +7,10 @@ on:
     types: [published]
 
 env:
-  REGISTRY:   ${{ secrets.REGISTRY_URL }}
-  REPOSITORY: ${{ secrets.REGISTRY_REPO }}
-  USERNAME:   ${{ secrets.REGISTRY_USERNAME }}
-  PASSWORD:   ${{ secrets.REGISTRY_PASSWORD }}
+  REGISTRY:   ${{ vars.REGISTRY_URL }}
+  REPOSITORY: ${{ vars.REGISTRY_REPO }}
+  USERNAME:   ${{ secrets.HARBOR_ROBOT_ACCOUNT_NAME }}
+  PASSWORD:   ${{ secrets.HARBOR_ROBOT_ACCOUNT_SECRET }}
 
 jobs:
   build-and-push-image:
