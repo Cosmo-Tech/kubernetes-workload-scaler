@@ -2,6 +2,7 @@ name: Build and push Docker image - Release
 run-name: "[docker release] branch=${{ github.ref_name }} - ${{ github.event.head_commit.message }}"
 
 on:
+  workflow_dispatch:
   release:
     types: [published]
 
