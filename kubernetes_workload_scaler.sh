@@ -160,16 +160,28 @@ scale_deployment() {
 
 # Scale down a given Cloudnative-PG cluster
 # CNPG clusters are not deployments nor statefulsets, they are pods triggered by the Cloudnative-PG operator
-# - if the operator is up   => 'spec.instances' of the cluster will be fullfilled
-# - if the operator is down => the pod can be killed, it will not restart
-#
-# Usage: scale_down_cnpg_cluster <namespace> <item> <replicas>
+# https://cloudnative-pg.io/docs/1.30/declarative_hibernation#hibernation
+# Usage: scale_down_cnpg_cluster <namespace> <item>
 scale_down_cnpg_cluster() {
     local ns=$1
     local item=$2
 
-    write_log "Scaling cnpg_cluster $ns/$item to 0..."
-    kubectl -n $ns delete pods -l cnpg.io/cluster=$item | log_output
+    write_log "Scaling cnpg_cluster $ns/$item (set annotation hibernation=on)..."
+    kubectl -n $ns annotate cluster $item --overwrite cnpg.io/hibernation=on | log_output
+    kubectl -n $ns wait --for=delete pod -l cnpg.io/cluster=$item --timeout=120s
+}
+
+
+# Scale up a given Cloudnative-PG cluster
+# CNPG clusters are not deployments nor statefulsets, they are pods triggered by the Cloudnative-PG operator
+# https://cloudnative-pg.io/docs/1.30/declarative_hibernation#hibernation
+# Usage: scale_up_cnpg_cluster <namespace> <item>
+scale_up_cnpg_cluster() {
+    local ns=$1
+    local item=$2
+
+    write_log "Scaling cnpg_cluster $ns/$item (set annotation hibernation=off)..."
+    kubectl -n $ns annotate cluster $item --overwrite cnpg.io/hibernation=off | log_output
 }
 
 
@@ -314,21 +326,21 @@ scale_down() {
         scale_statefulset $workload_ns $workload_name "0"
     done
 
-    write_log "=> Scaling down deployments..."
-    for workload in $deployments; do
-        workload_ns="$(get_saved_workload_ns $workload)"
-        workload_name="$(get_saved_workload_name $workload)"
-
-        scale_deployment $workload_ns $workload_name "0"
-    done
-
-    # Must be done after Cloudnative-PG operator deployment scale down, otherwise CNPG clusters will respawn
+    # Must be done before Cloudnative-PG operator deployment scaled, because it's the operator that will read the hibernation annotation on the cluster
     write_log "=> Scaling down cnpg_clusters..."
     for workload in $cnpg_clusters; do
         workload_ns="$(get_saved_workload_ns $workload)"
         workload_name="$(get_saved_workload_name $workload)"
 
         scale_down_cnpg_cluster $workload_ns $workload_name
+    done
+
+    write_log "=> Scaling down deployments..."
+    for workload in $deployments; do
+        workload_ns="$(get_saved_workload_ns $workload)"
+        workload_name="$(get_saved_workload_name $workload)"
+
+        scale_deployment $workload_ns $workload_name "0"
     done
 }
 
@@ -346,8 +358,6 @@ scale_up() {
 
     write_log "Running scale up job..."
 
-    # NOTE: cnpg_clusters are scaled up by the Cloudnative-PG operator, don't need to do it from the script
-
     write_log "=> Scaling up deployments..."
     for workload in $deployments; do
         workload_ns="$(get_saved_workload_ns $workload)"
@@ -364,6 +374,15 @@ scale_up() {
         workload_replicas="$(get_saved_workload_replicas $workload)"
 
         scale_statefulset $workload_ns $workload_name $workload_replicas
+    done
+
+    # Must be done after Cloudnative-PG operator deployment scaled, because it's the operator that will read the hibernation annotation on the cluster
+    write_log "=> Scaling up cnpg_clusters..."
+    for workload in $cnpg_clusters; do
+        workload_ns="$(get_saved_workload_ns $workload)"
+        workload_name="$(get_saved_workload_name $workload)"
+
+        scale_up_cnpg_cluster $workload_ns $workload_name
     done
 
     write_log "Writing scale status to $cm_ns/$cm_name..."
